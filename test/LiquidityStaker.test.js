@@ -140,7 +140,8 @@ contract("WIND", accounts => {
     checkApproval(deposit.receipt.rawLogs[1]);
     checkDeposit(deposit.receipt.rawLogs[2], accounts[0], 1, 1);
 
-    // Check getStakedAmount
+    // Check balanceOf/getStakedAmount
+    (await lp.balanceOf.call(staker.address)).should.be.eq.BN("1");
     (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("1");
 
     // Deposit more
@@ -151,6 +152,7 @@ contract("WIND", accounts => {
     checkApproval(deposit.receipt.rawLogs[3]);
     checkDeposit(deposit.receipt.rawLogs[4], accounts[0], 2, 1);
 
+    (await lp.balanceOf.call(staker.address)).should.be.eq.BN("3");
     (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("3");
 
     // Rewards shouldn't be anything notable as the divisor remained constant
