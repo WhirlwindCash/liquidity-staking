@@ -105,11 +105,6 @@ contract LiquidityStaker is ReentrancyGuard {
     // End meaningless transactions now
     require(amount != 0, "LiquidityStaker: Cannot deposit 0 WIND");
 
-    // Transfer the liquidity tokens
-    // Done here, despite checks, effects, interactions, due to nonReentrant and the trusted nature of the LP contract
-    // Stops being called in two different places below
-    _LP.safeTransferFrom(msg.sender, address(this), amount);
-
     // If this is a new staker, create them
     if (_stakers[msg.sender].amount == 0) {
       _stakers[msg.sender] = Staker(
@@ -117,6 +112,12 @@ contract LiquidityStaker is ReentrancyGuard {
         amount,
         0
       );
+
+      // Transfer the liquidity tokens
+      // Done here so we can set the divisor via the actual function
+      // Safe due to above Staker set (which can cause a div by 0 revert) and nonReentrant
+      _LP.safeTransferFrom(msg.sender, address(this), amount);
+
       _stakers[msg.sender].divisorOfPoolAtStart = getCurrentDivisorForPool(msg.sender);
 
       emit Deposit(msg.sender, amount, _stakers[msg.sender].divisorOfPoolAtStart);
@@ -131,8 +132,11 @@ contract LiquidityStaker is ReentrancyGuard {
     _claimRewards(msg.sender);
 
     // Update the amount now before calling an external contract
-    // Despite being trusted, checks, effects, interactions should always be followed
+    // Follow checks, effects, interactions when possible, despite not doing it above
     _stakers[msg.sender].amount += amount;
+
+    // Transfer the liquidity tokens
+    _LP.safeTransferFrom(msg.sender, address(this), amount);
 
     emit Deposit(msg.sender, amount, _stakers[msg.sender].divisorOfPoolAtStart);
   }

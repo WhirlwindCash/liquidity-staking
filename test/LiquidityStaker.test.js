@@ -60,7 +60,7 @@ contract("WIND", accounts => {
   let staker;
   let whirlwind;
 
-  before(async () => {
+  beforeEach(async () => {
     wind = await TestERC20.new();
     lp = await TestERC20.new();
     staker = await Staker.new(wind.address, lp.address);
@@ -73,8 +73,6 @@ contract("WIND", accounts => {
       await lp.approve(staker.address, "1000" + TENTH_DECIMAL, {from: accounts[i]});
     }
   });
-
-  // TODO check all events
 
   it("should allow depositing, claiming rewards, and withdrawing", async () => {
     // Deposit
@@ -136,26 +134,84 @@ contract("WIND", accounts => {
   });
 
   it("should allow you to deposit more", async () => {
-    // TODO
+    // Deposit
+    let deposit = await staker.deposit(1);
+    checkTransfer(deposit.receipt.rawLogs[0], lp.address, accounts[0], staker.address, 1);
+    checkApproval(deposit.receipt.rawLogs[1]);
+    checkDeposit(deposit.receipt.rawLogs[2], accounts[0], 1, 1);
+
+    // Check getStakedAmount
+    (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("1");
+
+    // Deposit more
+    deposit = await staker.deposit(2);
+    checkTransfer(deposit.receipt.rawLogs[0], wind.address, staker.address, accounts[0], new web3.utils.BN("1" + TENTH_DECIMAL));
+    checkRewards(deposit.receipt.rawLogs[1], accounts[0], new web3.utils.BN("1" + TENTH_DECIMAL), 1);
+    checkTransfer(deposit.receipt.rawLogs[2], lp.address, accounts[0], staker.address, 2);
+    checkApproval(deposit.receipt.rawLogs[3]);
+    checkDeposit(deposit.receipt.rawLogs[4], accounts[0], 2, 1);
+
+    (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("3");
+
+    // Rewards shouldn't be anything notable as the divisor remained constant
+    let rewards = await staker.claimRewards(accounts[0]);
+    checkTransfer(rewards.receipt.rawLogs[0], wind.address, staker.address, accounts[0], new web3.utils.BN("1" + TENTH_DECIMAL));
+    checkRewards(rewards.receipt.rawLogs[1], accounts[0], new web3.utils.BN("1" + TENTH_DECIMAL), 1);
   });
 
   it("should allow anyone to trigger a claim for anyone", async () => {
-    // TODO
+    await staker.deposit(1);
+    // Sanity check
+    assert.strictEqual((await staker.claimRewards(accounts[0], { from: accounts[1] })).receipt.from, accounts[1].toLowerCase());
+    (await wind.balanceOf.call(accounts[0])).should.be.eq.BN("901" + TENTH_DECIMAL);
+    (await wind.balanceOf.call(accounts[1])).should.be.eq.BN(0);
+    (await wind.balanceOf.call(staker.address)).should.be.eq.BN("99" + TENTH_DECIMAL);
   });
 
   it("should correctly scale the divisor based on the original divisor", async () => {
-    // TODO
+    await staker.deposit(1);
+    await lp.transfer(accounts[1], 3);
+    await staker.deposit(3, { from: accounts[1] });
+
+    // Should use a divisor of 2
+    // Base of 1, new of 4, 5 // 2
+    (await staker.getRewards.call(accounts[0]))["1"].should.be.eq.BN("2");
   });
 
   it("should update the original divisor if a lower one is now available", async () => {
-    // TODO
+    await staker.deposit(10);
+    await lp.transfer(accounts[1], 1);
+    await staker.deposit(1, { from: accounts[1] });
+
+    // Original divisor is now 11
+    await staker.withdraw(10);
+
+    // Call getRewards and verify it has a divisor of 1, not 6
+    (await staker.getRewards.call(accounts[1]))["1"].should.be.eq.BN("1");
+    await staker.claimRewards(accounts[1]);
+
+    // Now deposit the 10 again and verify the divisor is 6
+    await staker.deposit(10);
+    (await staker.getRewards.call(accounts[1]))["1"].should.be.eq.BN("6");
   });
 
   it("should allow withdrawing without claiming rewards", async () => {
-    // TODO
+    await staker.deposit(1);
+    let withdrawal = await staker.emergencyWithdraw();
+    assert.strictEqual(withdrawal.receipt.rawLogs.length, 2);
+    checkTransfer(withdrawal.receipt.rawLogs[0], lp.address, staker.address, accounts[0], 1);
+    checkWithdraw(withdrawal.receipt.rawLogs[1], accounts[0], 1);
+    (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("0");
   });
 
   it("shouldn't let you withdraw more than you have", async () => {
-    // TODO
+    await staker.deposit(1);
+    let errored = false;
+    try {
+      await staker.withdraw(2);
+    } catch(e) {
+      errored = (e.toString() == "Error: Returned error: VM Exception while processing transaction: revert");
+    }
+    assert(errored);
   });
 });
