@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // Enables not using SafeMath
-pragma solidity 0.8.3;
+pragma solidity =0.8.3;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -19,7 +19,7 @@ contract LiquidityStaker is ReentrancyGuard {
   // That said, it is technically long term viable due to potential arbitrary addition of Whirlwinds
   // That would allow using privacy mining funds as staking rewards
   // This is something to discuss down the road
-  uint256 public constant WIND_PER_BLOCK = 10e17;
+  uint256 public constant WIND_PER_BLOCK = 1e17;
 
   struct Staker {
     // Block deposited on/most recent block they claimed rewards
@@ -81,12 +81,15 @@ contract LiquidityStaker is ReentrancyGuard {
     );
   }
 
-
   function _claimRewards(address staker) internal {
     // A check if the last interaction block is the current block isn't needed
     // The block differential is a direct factor in the rewards calculation
     (uint256 rewards, uint256 divisor) = getRewards(staker);
+
+    // Always update the last block due to usage below
     _stakers[staker].lastBlock = block.number;
+
+    // Only call transfer when there's an amount
     if (rewards != 0) {
       _WIND.safeTransfer(staker, rewards);
       emit Rewards(staker, rewards, divisor);
@@ -100,7 +103,7 @@ contract LiquidityStaker is ReentrancyGuard {
 
   function deposit(uint256 amount) external nonReentrant {
     // End meaningless transactions now and don't risk a transferFrom reversion later
-    require(amount != 0);
+    require(amount != 0, "LiquidityStaker: Cannot deposit 0 WIND");
 
     // If this is a new staker, create them
     if (_stakers[msg.sender].amount == 0) {
@@ -108,8 +111,9 @@ contract LiquidityStaker is ReentrancyGuard {
         block.number,
         amount,
         // Don't call getCurrentDivisorForPool as the LP transfer has yet to occur
-        (_LP.balanceOf(address(this)) + amount) / _stakers[msg.sender].amount
+        (_LP.balanceOf(address(this)) + amount) / amount
       );
+      _LP.safeTransferFrom(msg.sender, address(this), amount);
       emit Deposit(msg.sender, amount, _stakers[msg.sender].divisorOfPoolAtStart);
 
       // Return now so we don't further edit this staker
