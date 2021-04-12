@@ -1,0 +1,12 @@
+{
+  "name": "liqudity-staking",
+  "version": "1.0.0",
+  "description": "Liquidity staking for WIND using a unique and innovative rewards algorithm",
+  "keywords": [],
+  "author": "Whirlwind Cash",
+  "license": "MIT",
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.0.0",
+    "truffle": "^5.3.1"
+  }
+}
