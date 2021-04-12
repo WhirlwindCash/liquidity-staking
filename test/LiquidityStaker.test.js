@@ -10,6 +10,52 @@ const Staker = artifacts.require("./LiquidityStaker.sol");
 // Required as the WIND per block is 1e17
 let TENTH_DECIMAL = "0".repeat(17);
 
+function logFormat(data) {
+  if (typeof(data) == "string") {
+    return "0x" + data.substr(2).toLowerCase().padStart(64, "0");
+  } else {
+    return "0x" + (new web3.utils.BN(data)).toString(16).padStart(64, "0");
+  }
+}
+
+function checkTransfer(log, token, from, to, amount) {
+  assert.strictEqual(log.address, token);
+  assert.strictEqual(log.data, logFormat(amount));
+  assert.deepEqual(log.topics, [
+    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+    logFormat(from),
+    logFormat(to)
+  ]);
+}
+
+function checkApproval(log) {
+  assert.strictEqual(log.topics[0], "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925");
+}
+
+function checkDeposit(log, from, amount, divisor) {
+  assert.deepEqual(log.topics, [
+    "0x90890809c654f11d6e72a28fa60149770a0d11ec6c92319d6ceb2bb0a4ea1a15",
+    logFormat(from)
+  ]);
+  assert.strictEqual(log.data, logFormat(amount) + logFormat(divisor).substr(2));
+}
+
+function checkRewards(log, from, amount, divisor) {
+  assert.deepEqual(log.topics, [
+    "0x61953b03ced70bb23c53b5a7058e431e3db88cf84a72660faea0849b785c43bd",
+    logFormat(from)
+  ]);
+  assert.strictEqual(log.data, logFormat(amount) + logFormat(divisor).substr(2));
+}
+
+function checkWithdraw(log, from, amount) {
+  assert.deepEqual(log.topics, [
+    "0x884edad9ce6fa2440d8a54cc123490eb96d2768479d49ff9c7366125a9424364",
+    logFormat(from)
+  ]);
+  assert.strictEqual(log.data, logFormat(amount));
+}
+
 contract("WIND", accounts => {
   let staker;
   let whirlwind;
@@ -32,12 +78,15 @@ contract("WIND", accounts => {
 
   it("should allow depositing, claiming rewards, and withdrawing", async () => {
     // Deposit
-    await staker.deposit(1);
+    let deposit = await staker.deposit(3);
+    checkTransfer(deposit.receipt.rawLogs[0], lp.address, accounts[0], staker.address, 3);
+    checkApproval(deposit.receipt.rawLogs[1]);
+    checkDeposit(deposit.receipt.rawLogs[2], accounts[0], 3, 1);
 
     // Check balances/getStakedAmount
-    (await lp.balanceOf.call(staker.address)).should.be.eq.BN(1);
-    (await lp.balanceOf.call(accounts[0])).should.be.eq.BN("99" + "9".repeat(18));
-    (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("1");
+    (await lp.balanceOf.call(staker.address)).should.be.eq.BN(3);
+    (await lp.balanceOf.call(accounts[0])).should.be.eq.BN("99" + "9".repeat(17) + "7");
+    (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("3");
 
     // Since we have 100% of the rewards and the deposit also created a block
     // We should be able to now claim 0.1 WIND
@@ -51,7 +100,9 @@ contract("WIND", accounts => {
     let reward = (await staker.getRewards.call(accounts[0]))["0"].should.be.eq.BN("1" + TENTH_DECIMAL);
 
     // Claim the rewards
-    await staker.claimRewards(accounts[0]);
+    let rewards = await staker.claimRewards(accounts[0]);
+    checkTransfer(rewards.receipt.rawLogs[0], wind.address, staker.address, accounts[0], new web3.utils.BN("2" + TENTH_DECIMAL));
+    checkRewards(rewards.receipt.rawLogs[1], accounts[0], new web3.utils.BN("2" + TENTH_DECIMAL), 1);
 
     // Confirm balances
     // Actually 2 blocks of rewards due to what's explained above
@@ -62,14 +113,24 @@ contract("WIND", accounts => {
     // Now that another block has passed...
     (await staker.getRewards.call(accounts[0]))["0"].should.be.eq.BN("1" + TENTH_DECIMAL);
 
-    // Test withdrawals
-    staker.withdraw(1);
+    // Test partial withdrawals and accurate reward calculation using existing balance
+    let withdrawal = await staker.withdraw(2);
+    checkTransfer(withdrawal.receipt.rawLogs[0], wind.address, staker.address, accounts[0], new web3.utils.BN("2" + TENTH_DECIMAL));
+    checkRewards(withdrawal.receipt.rawLogs[1], accounts[0], new web3.utils.BN("2" + TENTH_DECIMAL), 1);
+    checkTransfer(withdrawal.receipt.rawLogs[2], lp.address, staker.address, accounts[0], 2);
+    checkWithdraw(withdrawal.receipt.rawLogs[3], accounts[0], 2);
 
-    // Make sure claimRewards was called
-    (await wind.balanceOf.call(accounts[0])).should.be.eq.BN("904" + TENTH_DECIMAL);
-    (await wind.balanceOf.call(staker.address)).should.be.eq.BN("96" + TENTH_DECIMAL);
+    // Staked amount should be set to 1
+    (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("1");
 
-    // Make sure the withdraw occurred
+    // Withdraw that 1
+    await staker.withdraw(1);
+    (await staker.getStakedAmount.call(accounts[0])).should.be.eq.BN("0");
+
+    // Double check balances
+    (await wind.balanceOf.call(accounts[0])).should.be.eq.BN("905" + TENTH_DECIMAL);
+    (await wind.balanceOf.call(staker.address)).should.be.eq.BN("95" + TENTH_DECIMAL);
+
     (await lp.balanceOf.call(staker.address)).should.be.eq.BN(0);
     (await lp.balanceOf.call(accounts[0])).should.be.eq.BN("1000" + TENTH_DECIMAL);
   });
